@@ -108,12 +108,30 @@ impl ExpressionBuilder {
                 escape_char,
                 schema,
             ),
-            SqlExpr::Cast { expr, data_type } => {
-                self.parse_sql_cast_operator(parse_aggregations, expr, data_type, schema)
-            }
-            SqlExpr::Extract { field, expr } => {
-                self.parse_sql_extract_operator(parse_aggregations, field, expr, schema)
-            }
+            SqlExpr::InList {
+                expr,
+                list,
+                negated,
+            } => self.parse_sql_in_list_operator(
+                parse_aggregations,
+                expr,
+                list,
+                negated,
+                schema,
+            ),
+            SqlExpr::Cast { expr, data_type } => self.parse_sql_cast_operator(
+                parse_aggregations,
+                expr,
+                data_type,
+                schema,
+            ),
+            SqlExpr::Extract { field, expr } => self
+                .parse_sql_extract_operator(
+                    parse_aggregations,
+                    field,
+                    expr,
+                    schema,
+                ),
             SqlExpr::Interval {
                 value,
                 leading_field,
@@ -594,6 +612,41 @@ impl ExpressionBuilder {
             fun: DateTimeFunctionType::Extract { field: *field },
             arg: Box::new(right),
         })
+    }
+
+    fn parse_sql_in_list_operator(
+        &mut self,
+        parse_aggregations: bool,
+        expr: &Expr,
+        list: &Vec<Expr>,
+        negated: &bool,
+        schema: &Schema,
+    ) -> Result<Expression, PipelineError> {
+        let arg =
+            self.parse_sql_expression(parse_aggregations, expr, schema)?;
+
+        let mut list_values: Vec<Expression> = Vec::new();
+        for val in list {
+            list_values.push(self.parse_sql_expression(
+                parse_aggregations,
+                val,
+                schema,
+            )?);
+        }
+
+        let in_list_expression = Expression::InList {
+            arg: Box::new(arg),
+            list: list_values,
+        };
+
+        if *negated {
+            Ok(Expression::UnaryOperator {
+                operator: UnaryOperatorType::Not,
+                arg: Box::new(in_list_expression),
+            })
+        } else {
+            Ok(in_list_expression)
+        }
     }
 
     fn parse_sql_cast_operator(

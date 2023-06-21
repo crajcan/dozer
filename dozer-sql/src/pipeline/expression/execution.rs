@@ -19,6 +19,7 @@ use uuid::Uuid;
 
 use super::aggregate::AggregateFunctionType;
 use super::cast::CastOperatorType;
+use super::in_list::{evaluate_in_list, get_in_list_operator_type};
 use super::scalar::string::{evaluate_like, get_like_operator_type};
 
 #[derive(Clone, Debug, PartialEq)]
@@ -69,6 +70,10 @@ pub enum Expression {
         arg: Box<Expression>,
         pattern: Box<Expression>,
         escape: Option<char>,
+    },
+    InList {
+        arg: Box<Expression>,
+        list: Vec<Expression>,
     },
     Now {
         fun: DateTimeFunctionType,
@@ -178,7 +183,22 @@ impl Expression {
                 arg,
                 pattern,
                 escape: _,
-            } => arg.to_string(schema) + " LIKE " + pattern.to_string(schema).as_str(),
+            } => {
+                arg.to_string(schema)
+                    + " LIKE "
+                    + pattern.to_string(schema).as_str()
+            }
+            Expression::InList { arg, list } => {
+                arg.to_string(schema)
+                    + " IN ("
+                    + list
+                        .iter()
+                        .map(|e| e.to_string(schema))
+                        .collect::<Vec<String>>()
+                        .join(",")
+                        .as_str()
+                    + ")"
+            }
             Expression::GeoFunction { fun, args } => {
                 fun.to_string()
                     + "("
@@ -278,6 +298,7 @@ impl ExpressionExecutor for Expression {
                 pattern,
                 escape,
             } => evaluate_like(schema, arg, pattern, *escape, record),
+            Expression::InList { arg, list } => evaluate_in_list(schema, arg, list, record),
             Expression::Cast { arg, typ } => typ.evaluate(schema, arg, record),
             Expression::GeoFunction { fun, args } => fun.evaluate(schema, args, record),
             Expression::ConditionalExpression { fun, args } => fun.evaluate(schema, args, record),
@@ -338,6 +359,9 @@ impl ExpressionExecutor for Expression {
                 pattern,
                 escape: _,
             } => get_like_operator_type(arg, pattern, schema),
+            Expression::InList { arg, list } => {
+                get_in_list_operator_type(arg, list, schema)
+            }
             Expression::Cast { arg, typ } => typ.get_return_type(schema, arg),
             Expression::GeoFunction { fun, args } => get_geo_function_type(fun, args, schema),
             Expression::DateTimeFunction { fun, arg } => {
